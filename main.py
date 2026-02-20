@@ -44,18 +44,18 @@ app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
 app.config['UPLOAD_FOLDER'] = "static"
 
 
-def im_process(filename):
+def im_process(filename, number_of_clusters):
     image = Image.open(filename).resize((120,120)).convert("RGB")
     image = np.array(image)
     image_kmeans = image.reshape((-1,3))
-    kmeans = KMeans(n_clusters=10, random_state=0, n_init="auto").fit(image_kmeans)
+    kmeans = KMeans(n_clusters=number_of_clusters, random_state=0, n_init="auto").fit(image_kmeans)
     rgb_centroids = tuple((kmeans.cluster_centers_).astype(int))
     colors_name = [get_colour_name(color)[1] for color in rgb_centroids]
     new_df = pd.DataFrame({"name":colors_name, "color":rgb_centroids,})
     color_set = set(list(kmeans.labels_))
     count = [list(kmeans.labels_).count(color) for color in color_set]
     new_df["count"] = count
-    new_df["hex"]= [name_to_hex(color) for color in new_df["name"].values]
+    new_df["hex"] = [name_to_hex(color) for color in new_df["name"].values]
     constant = new_df["count"].sum()
 
     new_df["percentage"] = ((new_df["count"] / constant) * 100).round(2)
@@ -75,7 +75,7 @@ def index():
         n = request.form.get("number")
         print(n)
         f.save(os.path.join("static", f.filename))
-        new_df = im_process(f)
+        new_df = im_process(f, int(n))
         return render_template("index.html", new_df=new_df, form=form, file=f)
     return render_template("index.html", form=form, new_df=new_df)
 
