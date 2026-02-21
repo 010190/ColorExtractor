@@ -1,16 +1,29 @@
 import os
 import numpy as np
-from PIL import Image, ImagePalette, ImageColor
+from PIL import Image
 import pandas as pd
 from flask import *
 from flask_wtf import FlaskForm
 from wtforms import IntegerField
 from flask_wtf.file import FileField
-from webcolors import hex_to_name, rgb_to_name, name_to_hex
 import webcolors
 from flask_bootstrap import Bootstrap4
 from sklearn.cluster import KMeans
+from werkzeug.utils import secure_filename
+import uuid
+from dotenv import find_dotenv, load_dotenv
 
+
+dotenv_path = find_dotenv()
+
+load_dotenv(dotenv_path)
+app = Flask(__name__)
+bootstrap = Bootstrap4(app)
+
+
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY")
+app.config['UPLOAD_FOLDER'] = "static"
+app.config['MAX_CONTENT_LENGTH'] = os.getenv("values")
 
 class UploadForm(FlaskForm):
     file = FileField()
@@ -37,30 +50,33 @@ def get_colour_name(requested_colour):
     return actual_name, closest_name
 
 
-app = Flask(__name__)
-bootstrap = Bootstrap4(app)
-
-app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
-app.config['UPLOAD_FOLDER'] = "static"
 
 
 def im_process(filename, number_of_clusters):
-    image = Image.open(filename).resize((120,120)).convert("RGB")
-    image = np.array(image)
-    image_kmeans = image.reshape((-1,3))
-    kmeans = KMeans(n_clusters=number_of_clusters, random_state=0, n_init="auto").fit(image_kmeans)
-    rgb_centroids = tuple((kmeans.cluster_centers_).astype(int))
-    colors_name = [get_colour_name(color)[1] for color in rgb_centroids]
-    new_df = pd.DataFrame({"name":colors_name, "color":rgb_centroids,})
-    color_set = set(list(kmeans.labels_))
-    count = [list(kmeans.labels_).count(color) for color in color_set]
-    new_df["count"] = count
-    new_df["hex"] = [name_to_hex(color) for color in new_df["name"].values]
-    constant = new_df["count"].sum()
+    try:
+        image = Image.open(filename)
+        if image.format not in ['JPEG', 'PNG', 'GIF', 'BMP', 'WEBP']:
+            raise ValueError(f"Nieobsługiwany format: {image.format}")
+        else:
+            image = image.resize((120, 120)).convert("RGB")
+            image = np.array(image)
+            image_kmeans = image.reshape((-1,3))
+            kmeans = KMeans(n_clusters=number_of_clusters, random_state=0, n_init="auto").fit(image_kmeans)
+            rgb_centroids = tuple((kmeans.cluster_centers_).astype(int))
+            colors_name = [get_colour_name(color)[1] for color in rgb_centroids]
+            new_df = pd.DataFrame({"name":colors_name, "color":rgb_centroids,})
+            color_set = set(list(kmeans.labels_))
+            count = [list(kmeans.labels_).count(color) for color in color_set]
+            new_df["count"] = count
+            new_df["hex"] = [webcolors.name_to_hex(color) for color in new_df["name"].values]
+            constant = new_df["count"].sum()
 
-    new_df["percentage"] = ((new_df["count"] / constant) * 100).round(2)
-    print(count)
-    print(new_df)
+            new_df["percentage"] = ((new_df["count"] / constant) * 100).round(2)
+
+
+    except Exception as e:
+        app.logger.error(f"Błąd przetwarzania obrazu: {e}")
+        raise ValueError(f"Nie można przetworzyć obrazu: {str(e)}")
 
     return new_df.sort_values(by=["percentage"], ascending=False)
 
@@ -71,11 +87,15 @@ def index():
     form = UploadForm()
 
     if form.validate_on_submit():
-        f = request.files['file']
-        n = request.form.get("number")
-        print(n)
-        f.save(os.path.join("static", f.filename))
-        new_df = im_process(f, int(n))
+        f = form.file.data
+        n = form.number.data
+        if f:
+            filename = secure_filename(f.filename)
+            unique_filename = f"{uuid.uuid4()}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            f.save(filepath)
+
+            new_df = im_process(f, int(n))
         return render_template("index.html", new_df=new_df, form=form, file=f)
     return render_template("index.html", form=form, new_df=new_df)
 
